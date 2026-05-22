@@ -41,12 +41,12 @@ const CONFIG = {
 
   QUIXADA_RANGE:      80,
   QUIXADA_ARC:        60,   // total arc degrees (±30° from facing)
-  QUIXADA_COOLDOWN:  300,
+  QUIXADA_COOLDOWN:  700,
   QUIXADA_DAMAGE:      1,
 
   AU_RANGE:          100,
   AU_DISTANCE:        60,
-  AU_COOLDOWN:       800,
+  AU_COOLDOWN:      1200,
   AU_DAMAGE:           1,
 
   ENEMY_RADIUS:       16,
@@ -129,6 +129,11 @@ function drawRoundRect(ctx, x, y, w, h, r) {
   ctx.lineTo(x, y + r);
   ctx.arcTo(x, y, x + r, y, r);
   ctx.closePath();
+}
+
+function smoothstep(e0, e1, x) {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
 }
 
 // ─── INPUT MANAGER ────────────────────────────────────────────────────────────
@@ -401,13 +406,13 @@ class Player {
     this.wantsAu      = (input.rightJustPressed || input.spaceJustPressed) && this.auCooldown <= 0;
     if (this.wantsQuixada) {
       this.quixadaCooldown = CONFIG.QUIXADA_COOLDOWN;
-      this.flashTimer = 280; this.auFlash = false;
-      this.attackType = 'quixada'; this.attackTimer = 280; this.attackDuration = 280;
+      this.flashTimer = 700; this.auFlash = false;
+      this.attackType = 'quixada'; this.attackTimer = 700; this.attackDuration = 700;
     }
     if (this.wantsAu) {
       this.auCooldown = CONFIG.AU_COOLDOWN;
-      this.flashTimer = 420; this.auFlash = true;
-      this.attackType = 'au'; this.attackTimer = 420; this.attackDuration = 420;
+      this.flashTimer = 1000; this.auFlash = true;
+      this.attackType = 'au'; this.attackTimer = 1000; this.attackDuration = 1000;
     }
   }
 
@@ -453,9 +458,10 @@ class Player {
     const ap = (this.attackType && this.attackDuration > 0)
       ? (1 - this.attackTimer / this.attackDuration) : 0;
 
-    // AU CARTWHEEL: spin the whole body around its axis
+    // AU CARTWHEEL: ease-in/out wheel rotation so the spin accelerates and decelerates naturally
     if (this.attackType === 'au') {
-      ctx.rotate(ap * Math.PI * 2.3);
+      const wp = (smoothstep(0.05, 0.5, ap) + smoothstep(0.5, 0.95, ap)) * 0.5;
+      ctx.rotate(wp * Math.PI * 2.0);
     }
 
     // ── TAIL ──
@@ -465,33 +471,53 @@ class Player {
     ctx.strokeStyle = '#6B3A1F'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
     ctx.stroke();
 
-    // ── QUIXADA: kick leg sweeps in an arc behind the body ──
+    // ── QUIXADA: chambered crescent kick ──
+    // Phases: (0-0.22) weight-shift prep  →  (0.18-0.42) knee chamber  →
+    //         (0.38-0.76) sweeping crescent  →  (0.74-1.0) recovery
     if (this.attackType === 'quixada') {
-      const kt = Math.sin(ap * Math.PI);        // 0 → 1 → 0 bell curve
-      const ka = -0.4 + kt * 2.25;             // sweeps −23° → 109°
-      const hx = 3, hy = 10;
-      const kx = hx + Math.cos(ka - 0.25) * 13;
-      const ky = hy + Math.sin(ka - 0.25) * 13 - 4;
-      const fx = kx + Math.cos(ka + 0.2) * 12;
-      const fy = ky + Math.sin(ka + 0.2) * 12 - 2;
+      const chamber = smoothstep(0.14, 0.38, ap) * (1 - smoothstep(0.32, 0.54, ap));
+      const sweep   = smoothstep(0.36, 0.76, ap);
+      const recov   = smoothstep(0.74, 1.0,  ap);
+
+      // Whole body rotates into and out of kick
+      ctx.rotate(sweep * 0.22 - recov * 0.22);
+
+      // Hip origin
+      const hx = 4, hy = 10;
+      // Thigh: starts beside body, chambers upward, sweeps wide crescent, recovers
+      const thighA = 1.75 - chamber * 1.0 - sweep * 2.35 + recov * 1.9;
+      const kx = hx + Math.cos(thighA) * 14;
+      const ky = hy + Math.sin(thighA) * 14 - chamber * 7; // knee lifts during chamber
+
+      // Shin: lags behind thigh, snaps straight at strike peak
+      const shinExt = smoothstep(0.38, 0.66, ap) - smoothstep(0.66, 0.9, ap) * 0.82;
+      const shinA   = thighA - 0.48 - shinExt * 1.05;
+      const shinLen = 12 + shinExt * 5;
+      const fx = kx + Math.cos(shinA) * shinLen;
+      const fy = ky + Math.sin(shinA) * shinLen;
+
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      // Thigh
-      ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(kx, ky);
-      ctx.strokeStyle = '#FFFDE7'; ctx.lineWidth = 7; ctx.stroke();
-      // Shin
-      ctx.beginPath(); ctx.moveTo(kx, ky); ctx.lineTo(fx, fy);
-      ctx.lineWidth = 6; ctx.stroke();
-      // Foot
-      ctx.beginPath(); ctx.arc(fx, fy, 4, 0, Math.PI * 2);
+      ctx.strokeStyle = '#FFFDE7'; ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(kx, ky); ctx.stroke();
+      ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.moveTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
+      ctx.beginPath(); ctx.arc(fx, fy, 5.5, 0, Math.PI * 2);
       ctx.fillStyle = '#A07040'; ctx.fill();
-      // Motion-trail ghost dots
-      for (let i = 1; i <= 3; i++) {
-        const tkt = Math.max(0, kt - i * 0.14);
-        const tka = -0.4 + tkt * 2.25 + 0.2;
-        const tx = hx + Math.cos(tka) * 24 - 2;
-        const ty = hy + Math.sin(tka) * 24 - 6;
-        ctx.beginPath(); ctx.arc(tx, ty, 3.5 - i * 0.7, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,200,30,${0.32 - i * 0.08})`; ctx.fill();
+
+      // Motion trail — ghost foot positions along the crescent arc
+      if (sweep > 0.06 && sweep < 0.97) {
+        for (let i = 1; i <= 5; i++) {
+          const ts  = Math.max(0, sweep - i * 0.09);
+          const ta  = 1.75 - ts * 2.35;
+          const tkx = hx + Math.cos(ta) * 14;
+          const tky = hy + Math.sin(ta) * 14;
+          const tse = smoothstep(0.38, 0.66, 0.36 + ts * 0.4);
+          const tsa = ta - 0.48 - tse * 1.05;
+          const tfx = tkx + Math.cos(tsa) * (12 + tse * 5);
+          const tfy = tky + Math.sin(tsa) * (12 + tse * 5);
+          ctx.beginPath(); ctx.arc(tfx, tfy, 3.8 - i * 0.55, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,200,30,${0.30 - i * 0.052})`; ctx.fill();
+        }
       }
     }
 
@@ -544,23 +570,39 @@ class Player {
     ctx.beginPath(); ctx.moveTo(-2, 9); ctx.bezierCurveTo(-4, 14, -5, 18, -3, 22); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(2, 9);  ctx.bezierCurveTo(4, 14,  4, 19,  2, 23); ctx.stroke();
 
-    // ── AU CARTWHEEL: arms and legs fly outward ──
+    // ── AU CARTWHEEL: hands plant sequentially, legs spread at peak inversion ──
+    // Cartwheel wheel-progress for arm timing
     if (this.attackType === 'au') {
-      const at = Math.sin(ap * Math.PI); // 0 → 1 → 0
-      const ext = at * 22;
-      // Arms reaching overhead
+      const wp    = (smoothstep(0.05, 0.5, ap) + smoothstep(0.5, 0.95, ap)) * 0.5;
+      const peak  = Math.sin(ap * Math.PI);  // 0→1→0, max at ap=0.5
+      // First arm leads (plants at wp≈0.25), second follows (plants at wp≈0.75)
+      const arm1  = Math.max(0, 1 - Math.abs(wp - 0.25) / 0.18);
+      const arm2  = Math.max(0, 1 - Math.abs(wp - 0.75) / 0.18);
+      // Legs spread at peak inversion
+      const legSp = smoothstep(0.33, 0.5, ap) * (1 - smoothstep(0.5, 0.67, ap));
+
+      const a1Len = 12 + arm1 * 24;
+      const a2Len = 12 + arm2 * 24;
       ctx.strokeStyle = '#7B4F2E'; ctx.lineWidth = 5; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(-9, -5); ctx.lineTo(-9 - ext * 0.75, -5 - ext); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo( 9, -5); ctx.lineTo( 9 + ext * 0.75, -5 - ext); ctx.stroke();
-      // Hands
-      ctx.beginPath(); ctx.arc(-9 - ext * 0.75, -5 - ext, 3.5, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.moveTo(-9, -5);
+        ctx.lineTo(-9 - a1Len * 0.68, -5 - a1Len * 0.25 + arm1 * 16); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-9 - a1Len * 0.68, -5 - a1Len * 0.25 + arm1 * 16, 3.5, 0, Math.PI * 2);
       ctx.fillStyle = '#A07040'; ctx.fill();
-      ctx.beginPath(); ctx.arc( 9 + ext * 0.75, -5 - ext, 3.5, 0, Math.PI * 2);
+
+      ctx.strokeStyle = '#7B4F2E';
+      ctx.beginPath(); ctx.moveTo(9, -5);
+        ctx.lineTo(9 + a2Len * 0.68, -5 - a2Len * 0.25 + arm2 * 16); ctx.stroke();
+      ctx.beginPath(); ctx.arc(9 + a2Len * 0.68, -5 - a2Len * 0.25 + arm2 * 16, 3.5, 0, Math.PI * 2);
       ctx.fillStyle = '#A07040'; ctx.fill();
-      // Legs spreading wide
-      ctx.strokeStyle = '#FFFDE7'; ctx.lineWidth = 6;
-      ctx.beginPath(); ctx.moveTo(-5, 9); ctx.lineTo(-5 - ext * 0.55, 9 + ext); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo( 5, 9); ctx.lineTo( 5 + ext * 0.55, 9 + ext); ctx.stroke();
+
+      // Legs split wide at inversion
+      const legLen = 12 + legSp * 24;
+      ctx.strokeStyle = '#FFFDE7'; ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.moveTo(-5, 9); ctx.lineTo(-5 - legLen * 0.62, 9 + legLen * 0.78); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo( 5, 9); ctx.lineTo( 5 + legLen * 0.62, 9 + legLen * 0.78); ctx.stroke();
+      ctx.fillStyle = '#A07040';
+      ctx.beginPath(); ctx.arc(-5 - legLen*0.62, 9 + legLen*0.78, 4.5, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 5 + legLen*0.62, 9 + legLen*0.78, 4.5, 0, Math.PI*2); ctx.fill();
     }
 
     // ── HEAD ──
@@ -583,27 +625,33 @@ class Player {
     ctx.fillStyle = '#5D3A1A';
     ctx.beginPath(); ctx.arc(0, -15, 2, 0, Math.PI * 2); ctx.fill();
 
-    // ── QUIXADA ENERGY ARC ──
+    // ── QUIXADA: energy glow around foot at strike peak ──
     if (this.attackType === 'quixada' && this.attackTimer > 0) {
-      const kt = Math.sin(ap * Math.PI);
-      const ka = -0.4 + kt * 2.25;
-      const alpha = kt * 0.9;
-      ctx.beginPath();
-      ctx.arc(3, 5, 32, Math.max(-0.85, ka - 1.5), Math.min(2.1, ka + 0.12));
-      ctx.strokeStyle = `rgba(255,210,30,${alpha})`; ctx.lineWidth = 10; ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(3, 5, 24, Math.max(-0.85, ka - 0.7), Math.min(2.1, ka + 0.05));
-      ctx.strokeStyle = `rgba(255,255,180,${alpha * 0.7})`; ctx.lineWidth = 5; ctx.stroke();
+      const sweep  = smoothstep(0.36, 0.76, ap);
+      const pk     = Math.sin(ap * Math.PI);
+      const thighA = 1.75 - sweep * 2.35;
+      const kx     = 4 + Math.cos(thighA) * 14;
+      const ky     = 10 + Math.sin(thighA) * 14;
+      const shinExt = smoothstep(0.38, 0.66, ap) - smoothstep(0.66, 0.9, ap) * 0.82;
+      const shinA   = thighA - 0.48 - shinExt * 1.05;
+      const fx = kx + Math.cos(shinA) * (12 + shinExt * 5);
+      const fy = ky + Math.sin(shinA) * (12 + shinExt * 5);
+      if (pk > 0.18 && sweep > 0.12) {
+        ctx.beginPath(); ctx.arc(fx, fy, 10 + pk * 9, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,210,30,${pk * 0.65})`; ctx.lineWidth = 8; ctx.stroke();
+        ctx.beginPath(); ctx.arc(fx, fy, 5 + pk * 5, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,255,160,${pk * 0.45})`; ctx.lineWidth = 4; ctx.stroke();
+      }
     }
 
     // ── AU GLOW RINGS ──
     if (this.attackType === 'au' && this.attackTimer > 0) {
-      const at = Math.sin(ap * Math.PI);
-      const r = (this.radius + 6) * (1 + at * 0.65);
+      const peak = Math.sin(ap * Math.PI);
+      const r = (this.radius + 7) * (1 + peak * 0.5);
       ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(80,180,255,${at * 0.6})`; ctx.lineWidth = 7; ctx.stroke();
-      ctx.beginPath(); ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(160,230,255,${at * 0.35})`; ctx.lineWidth = 3; ctx.stroke();
+      ctx.strokeStyle = `rgba(80,180,255,${peak * 0.55})`; ctx.lineWidth = 7; ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, r * 0.52, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(160,230,255,${peak * 0.3})`; ctx.lineWidth = 3; ctx.stroke();
     }
 
     ctx.restore();
@@ -1426,45 +1474,94 @@ class Game {
   }
 
   _drawRodaBackground(ctx) {
-    ctx.fillStyle = '#0e0904';
-    ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+    // Deep background
+    ctx.fillStyle = '#080503';
+    ctx.fillRect(0, 0, 800, 600);
 
-    // Clay floor ellipse
-    const fg = ctx.createRadialGradient(400, 410, 20, 400, 410, 275);
-    fg.addColorStop(0, '#c9a45e'); fg.addColorStop(0.6, '#9e7838'); fg.addColorStop(1, '#543510');
-    ctx.fillStyle = fg;
-    ctx.beginPath(); ctx.ellipse(400, 410, 272, 178, 0, 0, Math.PI * 2); ctx.fill();
+    // Back wall — warm adobe/brick feel
+    ctx.fillStyle = '#261208';
+    ctx.fillRect(0, 0, 800, 240);
+    // Horizontal brick mortar lines
+    ctx.strokeStyle = 'rgba(70,30,8,0.4)'; ctx.lineWidth = 1;
+    for (let y = 28; y < 240; y += 30) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(800, y); ctx.stroke();
+    }
+    // Vertical brick joints (offset every other row)
+    for (let row = 0; row < 8; row++) {
+      const offset = (row % 2) * 55;
+      for (let x = offset; x < 800; x += 110) {
+        ctx.beginPath(); ctx.moveTo(x, row * 30); ctx.lineTo(x, (row + 1) * 30); ctx.stroke();
+      }
+    }
 
-    // Roda dashed ring
-    ctx.strokeStyle = 'rgba(255,210,100,0.32)';
-    ctx.lineWidth = 3; ctx.setLineDash([12, 9]);
-    ctx.beginPath(); ctx.ellipse(400, 410, 232, 152, 0, 0, Math.PI * 2); ctx.stroke();
+    // Clay performance floor
+    const floorG = ctx.createLinearGradient(0, 210, 0, 600);
+    floorG.addColorStop(0, '#9a6228');
+    floorG.addColorStop(0.35, '#c08040');
+    floorG.addColorStop(1, '#6a3e14');
+    ctx.fillStyle = floorG;
+    ctx.fillRect(0, 210, 800, 390);
+    // Floor plank lines
+    ctx.strokeStyle = 'rgba(80,44,10,0.22)'; ctx.lineWidth = 1;
+    for (let x = 0; x < 800; x += 90) {
+      ctx.beginPath(); ctx.moveTo(x, 210); ctx.lineTo(x, 600); ctx.stroke();
+    }
+    for (let y = 235; y < 600; y += 55) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(800, y); ctx.stroke();
+    }
+
+    // Roda circle painted on floor (the ring where players perform)
+    ctx.strokeStyle = 'rgba(255,215,100,0.3)';
+    ctx.lineWidth = 2.5; ctx.setLineDash([16, 10]);
+    ctx.beginPath(); ctx.arc(400, 400, 235, 0, Math.PI * 2); ctx.stroke();
     ctx.setLineDash([]);
 
-    // Seated/standing spectators around roda
-    for (let i = 0; i < 10; i++) {
-      if (i === 3 || i === 4 || i === 5) continue; // open gap facing viewer
-      const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
-      const px = 400 + Math.cos(a) * 228, py = 410 + Math.sin(a) * 155;
-      ctx.save(); ctx.translate(px, py);
-      ctx.fillStyle = 'rgba(18,10,4,0.9)';
-      ctx.beginPath(); ctx.ellipse(0, -24, 8, 10, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(0, -8, 7, 11, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
+    // ── AUDIENCE: curved cluster across the center-back ──
+    // All spectators gathered in a semi-arc behind the roda at y≈155–195
+    const audiencePositions = [
+      [105, 192, 0.84], [158, 178, 0.90], [210, 170, 0.94],
+      [263, 164, 0.97], [316, 160, 0.99], [370, 157, 1.00],
+      [424, 157, 1.00], [478, 160, 0.99], [532, 164, 0.97],
+      [585, 170, 0.94], [638, 178, 0.90], [691, 192, 0.84],
+    ];
+    for (const [px, py, sc] of audiencePositions) {
+      this._drawAudiencePerson(ctx, px, py, sc);
     }
 
-    this._drawAtabaque(ctx, 700, 335);
-    this._drawBerimbauPlayer(ctx, 58, 255);
-    this._drawBerimbauPlayer(ctx, 95, 358);
-    this._drawPandeiro(ctx, 52, 455);
+    // ── BATERIA: instruments right-side of audience, traditional placement ──
+    // In capoeira the bateria sits at the foot of the roda, stage right
+    this._drawBerimbauPlayer(ctx, 695, 215);
+    this._drawBerimbauPlayer(ctx, 736, 230);
+    this._drawAtabaque(ctx, 770, 228);
+    this._drawPandeiro(ctx, 658, 228);
 
-    // Torch glow
-    for (const [tx, ty, c] of [[95,115,'rgba(255,165,35,0.2)'],[705,115,'rgba(255,145,25,0.16)'],[400,75,'rgba(255,195,75,0.14)']]) {
-      const g = ctx.createRadialGradient(tx, ty, 0, tx, ty, 135);
-      g.addColorStop(0, c); g.addColorStop(1, 'rgba(0,0,0,0)');
+    // ── OVERHEAD STAGE LIGHTING ──
+    for (const [lx, col] of [[180,'rgba(255,155,45,0.18)'],[400,'rgba(255,195,80,0.15)'],[620,'rgba(255,140,35,0.17)']]) {
+      const g = ctx.createRadialGradient(lx, 0, 0, lx, 0, 310);
+      g.addColorStop(0, col); g.addColorStop(0.6, col.replace(/[\d.]+\)$/, '0.04)')); g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(tx, ty, 135, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(lx, 0, 310, 0, Math.PI * 2); ctx.fill();
     }
+    // Warm floor spotlight pools
+    for (const [lx, ly, r, col] of [
+      [250, 390, 100, 'rgba(255,175,55,0.10)'],
+      [400, 360, 120, 'rgba(255,200,80,0.12)'],
+      [550, 390, 100, 'rgba(255,165,45,0.10)'],
+    ]) {
+      const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, r);
+      g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(lx, ly, r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  _drawAudiencePerson(ctx, x, y, scale) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
+    ctx.fillStyle = 'rgba(20,11,4,0.92)';
+    ctx.beginPath(); ctx.ellipse(0, -40, 9, 11, 0, 0, Math.PI * 2); ctx.fill(); // head
+    ctx.beginPath(); ctx.ellipse(0, -22, 10, 15, 0, 0, Math.PI * 2); ctx.fill(); // torso
+    ctx.beginPath(); ctx.ellipse(0, -3,  9, 8,  0, 0, Math.PI * 2); ctx.fill(); // lower body
+    ctx.restore();
   }
 
   _drawAtabaque(ctx, x, y) {
@@ -1518,156 +1615,300 @@ class Game {
   }
 
   _drawTransitionPose(ctx, pose, t) {
-    const sin = Math.sin(t * Math.PI);
+    // Each pose: ginga-flow in (0-0.16), execute move (0.16-0.84), ginga-flow out (0.84-1.0)
+    // gT: how "deep" into the pose we are (0=ginga, 1=fully in pose)
+    const gT   = smoothstep(0, 0.18, t) * (1 - smoothstep(0.82, 1.0, t));
+    // movT: 0→1 across the middle of the pose window
+    const movT = Math.max(0, Math.min(1, (t - 0.18) / 0.64));
+    const mSin = Math.sin(movT * Math.PI);  // 0→1→0 bell within move
+
     ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 
-    if (pose === 0) {
-      // HANDSTAND — balanced on hands, legs spread up
-      ctx.rotate(Math.PI + Math.sin(t * Math.PI * 8) * 0.055);
-      ctx.translate(0, 16);
-      ctx.strokeStyle = '#7B4F2E'; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.moveTo(-9,8); ctx.lineTo(-11,26); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(9,8); ctx.lineTo(11,26); ctx.stroke();
-      ctx.fillStyle = '#A07040';
-      ctx.beginPath(); ctx.arc(-11,27,3.5,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(11,27,3.5,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(0,-4,10,13,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
-      ctx.save(); ctx.beginPath(); ctx.ellipse(0,-4,10,13,0,0,Math.PI*2); ctx.clip();
-      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-18,22,8); ctx.restore();
-      ctx.fillStyle='#FFFDE7';
-      ctx.beginPath(); ctx.moveTo(-4,-16); ctx.lineTo(-19,-42); ctx.lineTo(-12,-44); ctx.lineTo(-1,-18); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(4,-16); ctx.lineTo(19,-42); ctx.lineTo(12,-44); ctx.lineTo(1,-18); ctx.fill();
+    // ── Helper: draw head, shirt and corda centered at (0,0) ──
+    const drawUpperBody = (tiltAngle) => {
+      // Body torso
+      ctx.beginPath(); ctx.ellipse(0,-2,10,13,tiltAngle||0,0,Math.PI*2); ctx.fillStyle='#7B4F2E'; ctx.fill();
+      // Shirt
+      ctx.save();
+      ctx.beginPath(); ctx.ellipse(0,-1,9,11,tiltAngle||0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill(); ctx.clip();
+      ctx.fillStyle='#1B5E20'; ctx.fillRect(-10,-15,20,8);
+      ctx.fillStyle='#F9A825'; ctx.fillRect(-10,-7,20,2.5);
+      ctx.fillStyle='#F8F8F0'; ctx.beginPath(); ctx.moveTo(-4,-15); ctx.lineTo(0,-9); ctx.lineTo(4,-15); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle='#1B5E20'; ctx.font='bold 4.5px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('SAGUI',0,1);
+    };
+    const drawHead = () => {
+      ctx.beginPath(); ctx.arc(0,-19,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
       ctx.fillStyle='#A07040';
-      ctx.beginPath(); ctx.arc(-16,-43,4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(16,-43,4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(0,23,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
-      ctx.fillStyle='#C4956A'; ctx.beginPath(); ctx.ellipse(0,25,7,5,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(-10,-22,4.5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 10,-22,4.5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#C4956A';
+      ctx.beginPath(); ctx.ellipse(0,-16,6.5,5.5,0,0,Math.PI*2); ctx.fill();
       ctx.fillStyle='#1a1a1a';
-      ctx.beginPath(); ctx.arc(-3.5,21,2.2,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(3.5,21,2.2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(-3.5,-20.5,2.2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 3.5,-20.5,2.2,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#fff';
+      ctx.beginPath(); ctx.arc(-2.8,-21.5,0.8,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 4.2,-21.5,0.8,0,Math.PI*2); ctx.fill();
+    };
+    const drawPants = (lx, ly, rx, ry) => {
+      ctx.fillStyle='#FFFDE7';
+      ctx.beginPath(); ctx.moveTo(-5,6); ctx.lineTo(lx,ly); ctx.lineTo(lx+6,ly); ctx.lineTo(0,8); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(5,6); ctx.lineTo(rx,ry); ctx.lineTo(rx-6,ry); ctx.lineTo(0,8); ctx.fill();
+      ctx.fillStyle='#A07040';
+      ctx.beginPath(); ctx.arc(lx+3,ly,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(rx-3,ry,4,0,Math.PI*2); ctx.fill();
+    };
+
+    if (pose === 0) {
+      // ── BANANEIRA (Handstand) ──
+      // Inverts from ginga upright → fully upside-down, wobbles held
+      const inv   = gT;                              // 0=upright, 1=inverted
+      const wobble = Math.sin(movT * Math.PI * 9) * 0.035 * gT;  // held wobble
+      ctx.rotate(Math.PI * inv + wobble);
+      ctx.translate(0, 14 * gT);
+
+      // Arms / hands pressing floor
+      const armStr = smoothstep(0.3, 0.7, gT);
+      ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(-9,6); ctx.lineTo(-11, 16+armStr*10); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo( 9,6); ctx.lineTo( 11, 16+armStr*10); ctx.stroke();
+      ctx.fillStyle='#A07040';
+      ctx.beginPath(); ctx.arc(-11,17+armStr*10,3.5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 11,17+armStr*10,3.5,0,Math.PI*2); ctx.fill();
+
+      drawUpperBody();
+
+      // Legs: close together going up (inverted = visually down on screen before rotate)
+      // In inverted space, legs point "up" = away from floor. Split slightly for elegance.
+      const legSplit = smoothstep(0.4, 0.8, gT) * 10;
+      ctx.fillStyle='#FFFDE7';
+      ctx.beginPath(); ctx.moveTo(-4,-14); ctx.lineTo(-8-legSplit,-42); ctx.lineTo(-3-legSplit,-43); ctx.lineTo(-0,-15); ctx.fill();
+      ctx.beginPath(); ctx.moveTo( 4,-14); ctx.lineTo( 8+legSplit,-42); ctx.lineTo( 3+legSplit,-43); ctx.lineTo( 0,-15); ctx.fill();
+      ctx.fillStyle='#A07040';
+      ctx.beginPath(); ctx.arc(-6-legSplit,-43,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 6+legSplit,-43,4,0,Math.PI*2); ctx.fill();
+
+      drawHead();
     }
     else if (pose === 1) {
-      // ROLÉ — low circular sweep, one hand on floor
-      ctx.rotate(-0.3 + sin * 0.5); ctx.translate(0, 12);
+      // ── ROLÉ ──
+      // Body descends low, sweeps in a wide ground-level circle
+      const lowness = gT * 14;                             // body drops toward floor
+      const sweep   = movT * Math.PI * 1.7;               // arc rotation
+      const bodyTilt = -0.35 * gT + mSin * 0.2;
+      ctx.translate(Math.sin(sweep) * 8 * gT, lowness);
+      ctx.rotate(bodyTilt);
+
+      // Support arm (touches floor at peak lowness)
+      const armLow = smoothstep(0.35, 0.72, gT) * (1 - smoothstep(0.72, 1.0, gT));
       ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
-      ctx.beginPath(); ctx.moveTo(-12,-2); ctx.lineTo(-22,17); ctx.stroke();
-      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(-22,18,3.5,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(10,-13); ctx.lineTo(18,-29); ctx.stroke();
-      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(19,-30,3.5,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(0,-4,10,13,0.25,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
-      ctx.save(); ctx.beginPath(); ctx.ellipse(0,-4,10,13,0.25,0,Math.PI*2); ctx.clip();
-      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-18,22,8); ctx.restore();
+      ctx.beginPath(); ctx.moveTo(-11, 0); ctx.lineTo(-22, 14 + armLow*10); ctx.stroke();
+      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(-22, 15+armLow*10, 3.5,0,Math.PI*2); ctx.fill();
+      // Counter arm raised for balance
+      ctx.beginPath(); ctx.moveTo(10,-10); ctx.lineTo(18+mSin*4, -25-mSin*6); ctx.stroke();
+      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(19+mSin*4,-26-mSin*6,3.5,0,Math.PI*2); ctx.fill();
+
+      drawUpperBody(0.2);
+
+      // Sweeping leg (nearly flat on ground in full rolé)
+      const sweepX = Math.cos(sweep + 0.5) * (22 + gT * 18);
+      const sweepY = 10 + Math.abs(Math.sin(sweep + 0.5)) * 8 + gT * 6;
       ctx.fillStyle='#FFFDE7';
-      ctx.beginPath(); ctx.moveTo(-4,8); ctx.lineTo(-28+sin*13,22); ctx.lineTo(-24+sin*13,28); ctx.lineTo(-1,10); ctx.fill();
-      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(-26+sin*13,25,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-4,8); ctx.lineTo(sweepX, sweepY); ctx.lineTo(sweepX+6, sweepY-3); ctx.lineTo(0,9); ctx.fill();
+      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(sweepX+3, sweepY-1.5, 4.5,0,Math.PI*2); ctx.fill();
+      // Support leg bent
       ctx.fillStyle='#FFFDE7';
-      ctx.beginPath(); ctx.moveTo(4,8); ctx.lineTo(14,25); ctx.lineTo(19,22); ctx.lineTo(7,7); ctx.fill();
-      ctx.beginPath(); ctx.arc(4,-19,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
-      ctx.fillStyle='#C4956A'; ctx.beginPath(); ctx.ellipse(4,-16,6,5,0,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#1a1a1a';
-      ctx.beginPath(); ctx.arc(1,-20,2,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(7,-20,2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(4,8); ctx.lineTo(12,22); ctx.lineTo(17,20); ctx.lineTo(8,7); ctx.fill();
+
+      drawHead();
     }
     else if (pose === 2) {
-      // AÚ SEM MÃO — no-hand cartwheel, spread-eagle horizontal
-      ctx.rotate(-Math.PI/2 + sin * 0.28);
-      const sp = 0.5 + sin * 0.45;
+      // ── AÚ SEM MÃO ──
+      // Cartwheel with NO hands — body fully airborne, star-spread at peak
+      // The whole body rotates in the cartwheel plane
+      const cartAng = movT * Math.PI * 2;              // full 360° cartwheel
+      const cartW   = (smoothstep(0.05,0.5,movT) + smoothstep(0.5,0.95,movT)) * 0.5;
+      ctx.rotate((-Math.PI * 0.5) * gT + cartW * Math.PI * 2 * gT);
+
+      const spread  = Math.sin(movT * Math.PI);         // limb spread 0→1→0
+      const sp      = 0.4 + spread * 0.55;
+
+      // Body — horizontal in mid-cartwheel
       ctx.beginPath(); ctx.ellipse(0,0,13,10,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
       ctx.save(); ctx.beginPath(); ctx.ellipse(0,0,13,10,0,0,Math.PI*2); ctx.clip();
       ctx.fillStyle='#1B5E20'; ctx.fillRect(-13,-10,26,7); ctx.restore();
+      ctx.fillStyle='#1B5E20'; ctx.font='bold 4.5px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('SAGUI',0,1);
+
+      // Arms OUT — not touching floor, reaching to sides
       ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
-      ctx.beginPath(); ctx.moveTo(0,-8); ctx.lineTo(0,-30-sp*12); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0,8); ctx.lineTo(0,30+sp*12); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0,-8); ctx.lineTo(0, -28-sp*14); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, 8); ctx.lineTo(0,  28+sp*14); ctx.stroke();
       ctx.fillStyle='#A07040';
-      ctx.beginPath(); ctx.arc(0,-31-sp*12,4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(0,31+sp*12,4,0,Math.PI*2); ctx.fill();
-      ctx.strokeStyle='#FFFDE7'; ctx.lineWidth=6;
-      ctx.beginPath(); ctx.moveTo(-11,0); ctx.lineTo(-34-sp*10,0); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(11,0); ctx.lineTo(34+sp*10,0); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0,-29-sp*14,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 29+sp*14,4,0,Math.PI*2); ctx.fill();
+
+      // Legs split wide
+      ctx.strokeStyle='#FFFDE7'; ctx.lineWidth=7;
+      ctx.beginPath(); ctx.moveTo(-11,0); ctx.lineTo(-32-sp*12,0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo( 11,0); ctx.lineTo( 32+sp*12,0); ctx.stroke();
       ctx.fillStyle='#A07040';
-      ctx.beginPath(); ctx.arc(-35-sp*10,0,4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(35+sp*10,0,4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(20,0,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
-      ctx.fillStyle='#C4956A'; ctx.beginPath(); ctx.ellipse(20,2,6,5,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(-33-sp*12,0,4.5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 33+sp*12,0,4.5,0,Math.PI*2); ctx.fill();
+
+      // Head on leading side
+      const hx = 20 * gT;
+      ctx.beginPath(); ctx.arc(hx,0,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
+      ctx.fillStyle='#C4956A'; ctx.beginPath(); ctx.ellipse(hx,2,6,5,0,0,Math.PI*2); ctx.fill();
       ctx.fillStyle='#1a1a1a';
-      ctx.beginPath(); ctx.arc(17,-2,2,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(23,-2,2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(hx-3,-2,2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(hx+3,-2,2,0,Math.PI*2); ctx.fill();
     }
     else if (pose === 3) {
-      // MARTELO RODADO — spinning roundhouse kick
-      const spin = t * Math.PI * 2.6;
-      ctx.rotate(spin);
-      ctx.beginPath(); ctx.ellipse(0,-2,10,13,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
-      ctx.save(); ctx.beginPath(); ctx.ellipse(0,-2,10,13,0,0,Math.PI*2); ctx.clip();
-      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-16,22,8); ctx.restore();
+      // ── MARTELO RODADO ──
+      // Spinning hook kick — the spin accelerates, kick snaps at peak, spin continues
+      const totalSpin = movT * Math.PI * 3.4;  // ~1.7 full turns across the move
+      ctx.rotate(totalSpin * gT);
+
+      drawUpperBody();
+
+      // Extended kick leg (kicks at movT≈0.6, the snap)
+      const kickExt = smoothstep(0.45, 0.65, movT) * (1 - smoothstep(0.65, 0.85, movT));
+      const thighA  = 1.6 - kickExt * 2.0;
+      const kx = Math.cos(thighA) * 14;
+      const ky = 8 + Math.sin(thighA) * 14;
+      const shinExt2 = kickExt;
+      const shinA2  = thighA - 0.4 - shinExt2 * 0.9;
+      const fx = kx + Math.cos(shinA2) * (12 + shinExt2 * 6);
+      const fy = ky + Math.sin(shinA2) * (12 + shinExt2 * 6);
+
+      ctx.strokeStyle='#FFFDE7'; ctx.lineWidth=7;
+      ctx.beginPath(); ctx.moveTo(0,8); ctx.lineTo(kx,ky); ctx.stroke();
+      ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(kx,ky); ctx.lineTo(fx,fy); ctx.stroke();
+      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(fx,fy,5,0,Math.PI*2); ctx.fill();
+
+      // Support leg
       ctx.fillStyle='#FFFDE7';
-      ctx.beginPath(); ctx.moveTo(-4,8); ctx.lineTo(-40,2); ctx.lineTo(-38,-7); ctx.lineTo(-2,6); ctx.fill();
-      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(-39,-2,5,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#FFFDE7';
-      ctx.beginPath(); ctx.moveTo(4,8); ctx.lineTo(13,23); ctx.lineTo(18,21); ctx.lineTo(8,7); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(4,8); ctx.lineTo(10,24); ctx.lineTo(15,22); ctx.lineTo(8,7); ctx.fill();
+
+      // Arms windmilling for spin momentum
       ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
-      ctx.beginPath(); ctx.moveTo(-8,-10); ctx.lineTo(-22,-21); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(8,-10); ctx.lineTo(21,-19); ctx.stroke();
-      ctx.beginPath(); ctx.arc(0,-23,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
-      ctx.fillStyle='#1a1a1a';
-      ctx.beginPath(); ctx.arc(-3,-24,2.2,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(3,-24,2.2,0,Math.PI*2); ctx.fill();
-      // Kick trail
-      for (let i=1; i<=4; i++) {
-        ctx.save(); ctx.rotate(-i*0.2); ctx.globalAlpha=0.18-i*0.04;
-        ctx.strokeStyle='rgba(255,220,50,1)'; ctx.lineWidth=6;
-        ctx.beginPath(); ctx.moveTo(-4,8); ctx.lineTo(-38+i*3,2); ctx.stroke();
-        ctx.restore();
+      const armAng = totalSpin * 0.5;
+      ctx.beginPath(); ctx.moveTo(-8,-10);
+        ctx.lineTo(-8+Math.cos(armAng+2)*20, -10+Math.sin(armAng+2)*14); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(8,-10);
+        ctx.lineTo(8+Math.cos(armAng+5)*20, -10+Math.sin(armAng+5)*14); ctx.stroke();
+
+      // Kick velocity trails
+      if (kickExt > 0.08) {
+        for (let i = 1; i <= 4; i++) {
+          const ts  = Math.max(0, kickExt - i * 0.1);
+          const ta  = 1.6 - ts * 2.0;
+          const tfx = Math.cos(ta) * 14 + Math.cos(ta-0.4-ts*0.9)*(12+ts*6);
+          const tfy = 8 + Math.sin(ta) * 14 + Math.sin(ta-0.4-ts*0.9)*(12+ts*6);
+          ctx.beginPath(); ctx.arc(tfx, tfy, 3.5 - i*0.55, 0, Math.PI*2);
+          ctx.fillStyle = `rgba(255,210,40,${0.28 - i*0.055})`; ctx.fill();
+        }
       }
+
+      drawHead();
     }
     else if (pose === 4) {
-      // MACACO — back flip
-      const flip = sin;
-      ctx.translate(flip*16, -flip*28);
-      ctx.rotate(-0.45 + flip * Math.PI * 1.1);
-      ctx.beginPath(); ctx.ellipse(0,0,10,13,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
-      ctx.save(); ctx.beginPath(); ctx.ellipse(0,0,10,13,0,0,Math.PI*2); ctx.clip();
-      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-14,22,8); ctx.restore();
+      // ── MACACO ──
+      // Back handspring: crouch → push/arch backward → hands plant → legs over → land
+      const flip = movT;
+      // Phase easing
+      const crouchP  = smoothstep(0, 0.25, flip);                        // crouch
+      const launchP  = smoothstep(0.22, 0.55, flip);                     // airborne arch
+      const handP    = smoothstep(0.48, 0.68, flip) * (1-smoothstep(0.68,0.85,flip)); // hands plant
+      const landP    = smoothstep(0.78, 1.0,  flip);                     // land
+
+      // Body travels backward and arches
+      const arcX = launchP * 18 * gT;
+      const arcY = -Math.sin(launchP * Math.PI) * 28 * gT;
+      ctx.translate(arcX, arcY);
+
+      // Body rotation: crouches forward, arches back through handstand
+      const bodyAng = (-0.3 * crouchP + Math.PI * launchP - Math.PI * 0.15 * landP) * gT;
+      ctx.rotate(bodyAng);
+
+      drawUpperBody();
+
+      // Arms: in front during crouch, reach overhead/back during arch, plant during flip
       ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
-      ctx.beginPath(); ctx.moveTo(-8,-10); ctx.lineTo(-15,-28-flip*9); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(8,-10); ctx.lineTo(15,-28-flip*9); ctx.stroke();
+      const armReach = launchP - landP;
+      const armPlant = handP;
+      ctx.beginPath(); ctx.moveTo(-8,-10);
+        ctx.lineTo(-8 - armReach*14 - armPlant*10, -10 - armReach*22 + armPlant*20); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo( 8,-10);
+        ctx.lineTo( 8 + armReach*14 + armPlant*10, -10 - armReach*22 + armPlant*20); ctx.stroke();
       ctx.fillStyle='#A07040';
-      ctx.beginPath(); ctx.arc(-15,-29-flip*9,4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(15,-29-flip*9,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(-8-armReach*14-armPlant*10, -10-armReach*22+armPlant*20, 4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 8+armReach*14+armPlant*10, -10-armReach*22+armPlant*20, 4,0,Math.PI*2); ctx.fill();
+
+      // Legs: bent in crouch, kick up during arch, land
+      const legKick = smoothstep(0.3, 0.65, flip) * (1-smoothstep(0.65, 0.9, flip));
       ctx.fillStyle='#FFFDE7';
-      ctx.beginPath(); ctx.moveTo(-5,10); ctx.lineTo(-13,29); ctx.lineTo(-7,31); ctx.lineTo(-1,12); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(5,10); ctx.lineTo(13,29); ctx.lineTo(7,31); ctx.lineTo(1,12); ctx.fill();
-      ctx.beginPath(); ctx.arc(0,-23,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
-      ctx.fillStyle='#1a1a1a';
-      ctx.beginPath(); ctx.arc(-3,-24,2.2,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(3,-24,2.2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-5,8); ctx.lineTo(-10-crouchP*4+legKick*6, 22+crouchP*8-legKick*30);
+        ctx.lineTo(-5-crouchP*4+legKick*6, 22+crouchP*8-legKick*30); ctx.lineTo(-1,9); ctx.fill();
+      ctx.beginPath(); ctx.moveTo( 5,8); ctx.lineTo( 10+crouchP*4-legKick*6, 22+crouchP*8-legKick*30);
+        ctx.lineTo(  5+crouchP*4-legKick*6, 22+crouchP*8-legKick*30); ctx.lineTo( 1,9); ctx.fill();
+      ctx.fillStyle='#A07040';
+      ctx.beginPath(); ctx.arc(-7-crouchP*4+legKick*6, 22+crouchP*8-legKick*30, 4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 7+crouchP*4-legKick*6, 22+crouchP*8-legKick*30, 4,0,Math.PI*2); ctx.fill();
+
+      drawHead();
     }
     else if (pose === 5) {
-      // AÚ DE FRENTE — front handstand walkover facing forward
-      ctx.rotate(-Math.PI/2 + sin * 0.32);
-      ctx.scale(1,-1); ctx.translate(0,-8);
+      // ── AÚ DE FRENTE ──
+      // Front cartwheel/walkover: body tips forward through inversion,
+      // both hands plant sequentially, legs pass overhead, lands facing same direction
+      const cartW = (smoothstep(0.05,0.5,movT) + smoothstep(0.5,0.95,movT)) * 0.5;
+      // Tip forward (not sideways like a regular aú)
+      ctx.rotate((cartW * Math.PI * 2 - Math.PI * 0.5) * gT);
+
+      const peakInv = Math.sin(movT * Math.PI);       // 0→1→0
+      // Hand 1 plants at movT≈0.25, hand 2 at movT≈0.75
+      const h1 = Math.max(0, 1 - Math.abs(movT - 0.25) / 0.2);
+      const h2 = Math.max(0, 1 - Math.abs(movT - 0.75) / 0.2);
+      const legSp = smoothstep(0.32, 0.5, movT) * (1 - smoothstep(0.5, 0.68, movT));
+
+      // Body
+      ctx.beginPath(); ctx.ellipse(0,0,10,13,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0,0,10,13,0,0,Math.PI*2); ctx.clip();
+      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-14,22,8);
+      ctx.fillStyle='#F9A825'; ctx.fillRect(-11,-6,22,2.5); ctx.restore();
+      ctx.fillStyle='#1B5E20'; ctx.font='bold 4.5px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('SAGUI',0,2);
+
+      // Arms planting sequentially on floor
+      const a1len = 12 + h1 * 22;
+      const a2len = 12 + h2 * 22;
       ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
-      ctx.beginPath(); ctx.moveTo(-10,8); ctx.lineTo(-12,28); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(10,8); ctx.lineTo(12,28); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-9,5); ctx.lineTo(-9 - a1len*0.6, 5 - a1len*0.2 + h1*18); ctx.stroke();
+      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(-9-a1len*0.6, 5-a1len*0.2+h1*18, 4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo( 9,5); ctx.lineTo( 9 + a2len*0.6, 5 - a2len*0.2 + h2*18); ctx.stroke();
+      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc( 9+a2len*0.6, 5-a2len*0.2+h2*18, 4,0,Math.PI*2); ctx.fill();
+
+      // Legs overhead split at peak
+      const legLen = 12 + legSp * 26;
+      ctx.strokeStyle='#FFFDE7'; ctx.lineWidth=7;
+      ctx.beginPath(); ctx.moveTo(-5,-10); ctx.lineTo(-5 - legSp*8,  -10-legLen); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo( 5,-10); ctx.lineTo(  5 + legSp*8, -10-legLen); ctx.stroke();
       ctx.fillStyle='#A07040';
-      ctx.beginPath(); ctx.arc(-12,29,4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(12,29,4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(0,-4,10,13,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
-      ctx.save(); ctx.beginPath(); ctx.ellipse(0,-4,10,13,0,0,Math.PI*2); ctx.clip();
-      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-18,22,8); ctx.restore();
-      ctx.fillStyle='#FFFDE7';
-      const ls = sin * 10;
-      ctx.beginPath(); ctx.moveTo(-4,-16); ctx.lineTo(-14+ls,-42); ctx.lineTo(-8+ls,-44); ctx.lineTo(-1,-18); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(4,-16); ctx.lineTo(14-ls,-42); ctx.lineTo(8-ls,-44); ctx.lineTo(1,-18); ctx.fill();
-      ctx.fillStyle='#A07040';
-      ctx.beginPath(); ctx.arc(-11+ls,-43,4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(11-ls,-43,4,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(0,23,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
-      ctx.fillStyle='#C4956A'; ctx.beginPath(); ctx.ellipse(0,25,7,5,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(-5-legSp*8, -10-legLen, 4.5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 5+legSp*8, -10-legLen, 4.5,0,Math.PI*2); ctx.fill();
+
+      // Head visible facing forward
+      ctx.beginPath(); ctx.arc(0,20,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
+      ctx.fillStyle='#C4956A'; ctx.beginPath(); ctx.ellipse(0,22,6,5,0,0,Math.PI*2); ctx.fill();
       ctx.fillStyle='#1a1a1a';
-      ctx.beginPath(); ctx.arc(-3.5,21,2.2,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(3.5,21,2.2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(-3.5,19,2.2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( 3.5,19,2.2,0,Math.PI*2); ctx.fill();
     }
+
     ctx.restore();
   }
 
