@@ -59,6 +59,7 @@ const CONFIG = {
   ENEMIES_PER_LEVEL:   3,
   SPEED_PER_LEVEL:    10,
   LEVEL_CLEAR_DELAY: 1500,
+  TRANSITION_DURATION: 5200,
 
   SPAWN_MARGIN:       20,
   SPAWN_MIN_DIST:    150,
@@ -839,7 +840,9 @@ class Game {
     this.score = 0;
     this.highScore = 0;
     this.highLevel = 1;
-    this.state = 'MENU'; // 'MENU' | 'PLAYING' | 'GAME_OVER'
+    this.state = 'MENU'; // 'MENU' | 'PLAYING' | 'GAME_OVER' | 'LEVEL_TRANSITION'
+    this.transitionTimer = 0;
+    this.transitionNextLevel = 1;
     this.lastTime = 0;
     this._bgStars = [];
   }
@@ -880,6 +883,15 @@ class Game {
   }
 
   _update(dt) {
+    if (this.state === 'LEVEL_TRANSITION') {
+      this.transitionTimer += dt;
+      if (this.transitionTimer >= CONFIG.TRANSITION_DURATION) {
+        this.player.x = 400; this.player.y = 300;
+        this.levelManager.startLevel(this.transitionNextLevel, 400, 300);
+        this.state = 'PLAYING';
+      }
+      return;
+    }
     if (this.state !== 'PLAYING') return;
 
     const p = this.player;
@@ -947,9 +959,11 @@ class Game {
       return;
     }
 
-    // Level advance
+    // Level advance — go through transition animation
     if (lm.state === 'complete') {
-      lm.startLevel(lm.level + 1, p.x, p.y);
+      this.transitionTimer = 0;
+      this.transitionNextLevel = lm.level + 1;
+      this.state = 'LEVEL_TRANSITION';
     }
   }
 
@@ -990,8 +1004,9 @@ class Game {
     // Show OS cursor on menu/game-over so buttons are clickable; hide during play
     this.canvas.style.cursor = this.state === 'PLAYING' ? 'none' : 'default';
 
-    if (this.state === 'MENU')      { this._drawMenu(ctx);    return; }
-    if (this.state === 'GAME_OVER') { this._drawGameOver(ctx); return; }
+    if (this.state === 'MENU')             { this._drawMenu(ctx);       return; }
+    if (this.state === 'GAME_OVER')        { this._drawGameOver(ctx);   return; }
+    if (this.state === 'LEVEL_TRANSITION') { this._drawTransition(ctx); return; }
 
     // PLAYING
     this._drawBackground(ctx);
@@ -1159,51 +1174,54 @@ class Game {
   }
 
   _drawMenu(ctx) {
-    // Background
+    // Background — deep forest green
     const grad = ctx.createLinearGradient(0, 0, 0, CONFIG.HEIGHT);
-    grad.addColorStop(0, '#1a1a2e');
-    grad.addColorStop(1, '#0d0d1a');
+    grad.addColorStop(0, '#3c5b2a');
+    grad.addColorStop(0.55, '#243818');
+    grad.addColorStop(1, '#14200d');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
 
-    // Decorative studio shapes in bg
-    ctx.globalAlpha = 0.06;
-    ctx.fillStyle = '#FFD600';
-    ctx.beginPath(); ctx.arc(100, 500, 80, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(700, 100, 60, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#FF6F00';
-    ctx.fillRect(650, 400, 120, 80);
+    // Decorative shapes
+    ctx.globalAlpha = 0.13;
+    ctx.fillStyle = '#a1bf77';
+    ctx.beginPath(); ctx.arc(100, 500, 85, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(710, 90, 65, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#892c3d';
+    ctx.fillRect(640, 400, 130, 90);
+    ctx.fillStyle = '#bf5479';
+    ctx.beginPath(); ctx.arc(400, 570, 110, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 1;
 
     // Title
     ctx.textAlign = 'center';
-    ctx.shadowColor = 'rgba(255,180,0,0.5)'; ctx.shadowBlur = 20;
-    ctx.fillStyle = '#FFD600';
+    ctx.shadowColor = 'rgba(253,162,179,0.55)'; ctx.shadowBlur = 22;
+    ctx.fillStyle = '#fda2b3';
     ctx.font = 'bold 60px monospace';
     ctx.fillText('SAGUI', CONFIG.WIDTH / 2, 175);
-    ctx.fillStyle = '#FF6F00';
+    ctx.fillStyle = '#a1bf77';
     ctx.font = 'bold 52px monospace';
     ctx.fillText('GAME', CONFIG.WIDTH / 2, 240);
     ctx.shadowBlur = 0;
 
     // Tagline
-    ctx.fillStyle = '#FFCC80';
+    ctx.fillStyle = '#fda2b3';
     ctx.font = '17px monospace';
     ctx.fillText('Fight chickens. Defend the studio. Be the monkey.', CONFIG.WIDTH / 2, 274);
-    ctx.fillStyle = '#FFB3C1';
+    ctx.fillStyle = '#bf5479';
     ctx.font = 'italic 15px monospace';
     ctx.fillText('Be sigma like karlita', CONFIG.WIDTH / 2, 296);
 
     // Hi-score
-    ctx.fillStyle = '#78909C';
+    ctx.fillStyle = '#a1bf77';
     ctx.font = '15px monospace';
     ctx.fillText(`Best Score: ${this.highScore}     Best Level: ${this.highLevel}`, CONFIG.WIDTH / 2, 318);
 
     // Start button
-    ctx.fillStyle = '#FF6F00';
+    ctx.fillStyle = '#892c3d';
     drawRoundRect(ctx, 320, 355, 160, 50, 10);
     ctx.fill();
-    ctx.strokeStyle = '#FFD600'; ctx.lineWidth = 2;
+    ctx.strokeStyle = '#fda2b3'; ctx.lineWidth = 2.5;
     drawRoundRect(ctx, 320, 355, 160, 50, 10);
     ctx.stroke();
     ctx.fillStyle = '#fff';
@@ -1213,7 +1231,7 @@ class Game {
     ctx.shadowBlur = 0;
 
     // Controls
-    ctx.fillStyle = '#546E7A';
+    ctx.fillStyle = '#a1bf77';
     ctx.font = '13px monospace';
     ctx.fillText('ARROWS / WASD: Move', CONFIG.WIDTH / 2, 432);
     ctx.fillText('LEFT CLICK: Quixada (kick)    RIGHT CLICK / SPACE: Aú (cartwheel)', CONFIG.WIDTH / 2, 452);
@@ -1347,6 +1365,350 @@ class Game {
     // Tip
     ctx.fillStyle = '#546E7A'; ctx.font = '13px monospace';
     ctx.fillText('The chickens got you this time...', CONFIG.WIDTH / 2, 498);
+  }
+
+  // ─── LEVEL TRANSITION ───────────────────────────────────────────────────────
+
+  _drawTransition(ctx) {
+    const t = this.transitionTimer;
+    const T = CONFIG.TRANSITION_DURATION;
+    let alpha = 1;
+    if (t < 300) alpha = t / 300;
+    if (t > T - 400) alpha = (T - t) / 400;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+
+    this._drawRodaBackground(ctx);
+
+    // 6 poses × 650ms = 3900ms, then chicken + hold for remaining 1300ms
+    const POSE_DUR = 650;
+    const poseIndex = Math.min(5, Math.floor(t / POSE_DUR));
+    const poseT = (t % POSE_DUR) / POSE_DUR;
+
+    // Monkey center stage
+    ctx.save();
+    ctx.translate(370, 310);
+    ctx.scale(2.3, 2.3);
+    this._drawTransitionPose(ctx, poseIndex, poseT);
+    ctx.restore();
+
+    // Pose label
+    if (t < 3900) {
+      const names = ['Handstand', 'Rolé', 'Aú sem Mão', 'Martelo Rodado', 'Macaco', 'Aú de Frente'];
+      ctx.fillStyle = 'rgba(0,0,0,0.58)';
+      drawRoundRect(ctx, 215, 498, 370, 40, 8);
+      ctx.fill();
+      ctx.fillStyle = '#a1bf77';
+      ctx.font = 'bold 17px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(names[poseIndex], 400, 523);
+    }
+
+    // Lovestruck chicken slides in from right after moves finish
+    if (t > 3900) {
+      const ct = Math.min(1, (t - 3900) / 500);
+      this._drawLovestruckChicken(ctx, 510 + 130 * (1 - ct), 310, ct);
+    }
+
+    // Top banner
+    ctx.fillStyle = 'rgba(0,0,0,0.68)';
+    drawRoundRect(ctx, 225, 20, 350, 68, 12);
+    ctx.fill();
+    ctx.fillStyle = '#fda2b3';
+    ctx.font = 'bold 24px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`LEVEL ${this.transitionNextLevel}`, 400, 48);
+    ctx.fillStyle = '#a1bf77';
+    ctx.font = '14px monospace';
+    ctx.fillText('Mestre Sagui shows his moves!', 400, 74);
+
+    ctx.restore();
+  }
+
+  _drawRodaBackground(ctx) {
+    ctx.fillStyle = '#0e0904';
+    ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+
+    // Clay floor ellipse
+    const fg = ctx.createRadialGradient(400, 410, 20, 400, 410, 275);
+    fg.addColorStop(0, '#c9a45e'); fg.addColorStop(0.6, '#9e7838'); fg.addColorStop(1, '#543510');
+    ctx.fillStyle = fg;
+    ctx.beginPath(); ctx.ellipse(400, 410, 272, 178, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Roda dashed ring
+    ctx.strokeStyle = 'rgba(255,210,100,0.32)';
+    ctx.lineWidth = 3; ctx.setLineDash([12, 9]);
+    ctx.beginPath(); ctx.ellipse(400, 410, 232, 152, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Seated/standing spectators around roda
+    for (let i = 0; i < 10; i++) {
+      if (i === 3 || i === 4 || i === 5) continue; // open gap facing viewer
+      const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+      const px = 400 + Math.cos(a) * 228, py = 410 + Math.sin(a) * 155;
+      ctx.save(); ctx.translate(px, py);
+      ctx.fillStyle = 'rgba(18,10,4,0.9)';
+      ctx.beginPath(); ctx.ellipse(0, -24, 8, 10, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, -8, 7, 11, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    this._drawAtabaque(ctx, 700, 335);
+    this._drawBerimbauPlayer(ctx, 58, 255);
+    this._drawBerimbauPlayer(ctx, 95, 358);
+    this._drawPandeiro(ctx, 52, 455);
+
+    // Torch glow
+    for (const [tx, ty, c] of [[95,115,'rgba(255,165,35,0.2)'],[705,115,'rgba(255,145,25,0.16)'],[400,75,'rgba(255,195,75,0.14)']]) {
+      const g = ctx.createRadialGradient(tx, ty, 0, tx, ty, 135);
+      g.addColorStop(0, c); g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(tx, ty, 135, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  _drawAtabaque(ctx, x, y) {
+    ctx.save(); ctx.translate(x, y);
+    ctx.fillStyle = '#5D2A0C';
+    ctx.beginPath();
+    ctx.moveTo(-16,-88); ctx.lineTo(16,-88); ctx.lineTo(20,18); ctx.lineTo(-20,18); ctx.closePath();
+    ctx.fill(); ctx.strokeStyle = '#3A1A08'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0,-88,16,6,0,0,Math.PI*2);
+    ctx.fillStyle = '#C4A265'; ctx.fill(); ctx.strokeStyle = '#8B7355'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.strokeStyle = '#8B4513'; ctx.lineWidth = 1;
+    for (const lx of [-8,0,8]) { ctx.beginPath(); ctx.moveTo(lx,-80); ctx.lineTo(lx+2,12); ctx.stroke(); }
+    ctx.fillStyle = '#3A1A08';
+    ctx.beginPath(); ctx.ellipse(0,18,20,7,0,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  _drawBerimbauPlayer(ctx, x, y) {
+    ctx.save(); ctx.translate(x, y);
+    ctx.fillStyle = 'rgba(18,10,4,0.93)';
+    ctx.beginPath(); ctx.arc(5,-52,11,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0,-30,10,17,0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#6B3A1F'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(15,20); ctx.quadraticCurveTo(32,-22,10,-86); ctx.stroke();
+    ctx.strokeStyle = '#bbb'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(15,20); ctx.lineTo(10,-86); ctx.stroke();
+    ctx.fillStyle = '#8B6914';
+    ctx.beginPath(); ctx.ellipse(21,10,11,8,0.6,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(18,10,4,0.9)'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(0,-22); ctx.lineTo(18,6); ctx.stroke();
+    ctx.restore();
+  }
+
+  _drawPandeiro(ctx, x, y) {
+    ctx.save(); ctx.translate(x, y);
+    ctx.fillStyle = 'rgba(18,10,4,0.93)';
+    ctx.beginPath(); ctx.arc(0,-40,9,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0,-24,8,13,0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(18,10,4,0.9)'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(5,-27); ctx.lineTo(24,-20); ctx.stroke();
+    ctx.strokeStyle = '#6B3A1F'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(30,-17,14,0,Math.PI*2); ctx.stroke();
+    ctx.fillStyle = 'rgba(196,162,101,0.75)';
+    ctx.beginPath(); ctx.arc(30,-17,12,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#8B4513'; ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const a = (i/4)*Math.PI*2;
+      ctx.beginPath(); ctx.arc(30+Math.cos(a)*8,-17+Math.sin(a)*8,2.5,0,Math.PI*2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  _drawTransitionPose(ctx, pose, t) {
+    const sin = Math.sin(t * Math.PI);
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+    if (pose === 0) {
+      // HANDSTAND — balanced on hands, legs spread up
+      ctx.rotate(Math.PI + Math.sin(t * Math.PI * 8) * 0.055);
+      ctx.translate(0, 16);
+      ctx.strokeStyle = '#7B4F2E'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(-9,8); ctx.lineTo(-11,26); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(9,8); ctx.lineTo(11,26); ctx.stroke();
+      ctx.fillStyle = '#A07040';
+      ctx.beginPath(); ctx.arc(-11,27,3.5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(11,27,3.5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0,-4,10,13,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0,-4,10,13,0,0,Math.PI*2); ctx.clip();
+      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-18,22,8); ctx.restore();
+      ctx.fillStyle='#FFFDE7';
+      ctx.beginPath(); ctx.moveTo(-4,-16); ctx.lineTo(-19,-42); ctx.lineTo(-12,-44); ctx.lineTo(-1,-18); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(4,-16); ctx.lineTo(19,-42); ctx.lineTo(12,-44); ctx.lineTo(1,-18); ctx.fill();
+      ctx.fillStyle='#A07040';
+      ctx.beginPath(); ctx.arc(-16,-43,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(16,-43,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0,23,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
+      ctx.fillStyle='#C4956A'; ctx.beginPath(); ctx.ellipse(0,25,7,5,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#1a1a1a';
+      ctx.beginPath(); ctx.arc(-3.5,21,2.2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(3.5,21,2.2,0,Math.PI*2); ctx.fill();
+    }
+    else if (pose === 1) {
+      // ROLÉ — low circular sweep, one hand on floor
+      ctx.rotate(-0.3 + sin * 0.5); ctx.translate(0, 12);
+      ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(-12,-2); ctx.lineTo(-22,17); ctx.stroke();
+      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(-22,18,3.5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(10,-13); ctx.lineTo(18,-29); ctx.stroke();
+      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(19,-30,3.5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0,-4,10,13,0.25,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0,-4,10,13,0.25,0,Math.PI*2); ctx.clip();
+      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-18,22,8); ctx.restore();
+      ctx.fillStyle='#FFFDE7';
+      ctx.beginPath(); ctx.moveTo(-4,8); ctx.lineTo(-28+sin*13,22); ctx.lineTo(-24+sin*13,28); ctx.lineTo(-1,10); ctx.fill();
+      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(-26+sin*13,25,4,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#FFFDE7';
+      ctx.beginPath(); ctx.moveTo(4,8); ctx.lineTo(14,25); ctx.lineTo(19,22); ctx.lineTo(7,7); ctx.fill();
+      ctx.beginPath(); ctx.arc(4,-19,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
+      ctx.fillStyle='#C4956A'; ctx.beginPath(); ctx.ellipse(4,-16,6,5,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#1a1a1a';
+      ctx.beginPath(); ctx.arc(1,-20,2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(7,-20,2,0,Math.PI*2); ctx.fill();
+    }
+    else if (pose === 2) {
+      // AÚ SEM MÃO — no-hand cartwheel, spread-eagle horizontal
+      ctx.rotate(-Math.PI/2 + sin * 0.28);
+      const sp = 0.5 + sin * 0.45;
+      ctx.beginPath(); ctx.ellipse(0,0,13,10,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0,0,13,10,0,0,Math.PI*2); ctx.clip();
+      ctx.fillStyle='#1B5E20'; ctx.fillRect(-13,-10,26,7); ctx.restore();
+      ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(0,-8); ctx.lineTo(0,-30-sp*12); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0,8); ctx.lineTo(0,30+sp*12); ctx.stroke();
+      ctx.fillStyle='#A07040';
+      ctx.beginPath(); ctx.arc(0,-31-sp*12,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0,31+sp*12,4,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#FFFDE7'; ctx.lineWidth=6;
+      ctx.beginPath(); ctx.moveTo(-11,0); ctx.lineTo(-34-sp*10,0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(11,0); ctx.lineTo(34+sp*10,0); ctx.stroke();
+      ctx.fillStyle='#A07040';
+      ctx.beginPath(); ctx.arc(-35-sp*10,0,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(35+sp*10,0,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(20,0,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
+      ctx.fillStyle='#C4956A'; ctx.beginPath(); ctx.ellipse(20,2,6,5,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#1a1a1a';
+      ctx.beginPath(); ctx.arc(17,-2,2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(23,-2,2,0,Math.PI*2); ctx.fill();
+    }
+    else if (pose === 3) {
+      // MARTELO RODADO — spinning roundhouse kick
+      const spin = t * Math.PI * 2.6;
+      ctx.rotate(spin);
+      ctx.beginPath(); ctx.ellipse(0,-2,10,13,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0,-2,10,13,0,0,Math.PI*2); ctx.clip();
+      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-16,22,8); ctx.restore();
+      ctx.fillStyle='#FFFDE7';
+      ctx.beginPath(); ctx.moveTo(-4,8); ctx.lineTo(-40,2); ctx.lineTo(-38,-7); ctx.lineTo(-2,6); ctx.fill();
+      ctx.fillStyle='#A07040'; ctx.beginPath(); ctx.arc(-39,-2,5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#FFFDE7';
+      ctx.beginPath(); ctx.moveTo(4,8); ctx.lineTo(13,23); ctx.lineTo(18,21); ctx.lineTo(8,7); ctx.fill();
+      ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(-8,-10); ctx.lineTo(-22,-21); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(8,-10); ctx.lineTo(21,-19); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0,-23,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
+      ctx.fillStyle='#1a1a1a';
+      ctx.beginPath(); ctx.arc(-3,-24,2.2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(3,-24,2.2,0,Math.PI*2); ctx.fill();
+      // Kick trail
+      for (let i=1; i<=4; i++) {
+        ctx.save(); ctx.rotate(-i*0.2); ctx.globalAlpha=0.18-i*0.04;
+        ctx.strokeStyle='rgba(255,220,50,1)'; ctx.lineWidth=6;
+        ctx.beginPath(); ctx.moveTo(-4,8); ctx.lineTo(-38+i*3,2); ctx.stroke();
+        ctx.restore();
+      }
+    }
+    else if (pose === 4) {
+      // MACACO — back flip
+      const flip = sin;
+      ctx.translate(flip*16, -flip*28);
+      ctx.rotate(-0.45 + flip * Math.PI * 1.1);
+      ctx.beginPath(); ctx.ellipse(0,0,10,13,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0,0,10,13,0,0,Math.PI*2); ctx.clip();
+      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-14,22,8); ctx.restore();
+      ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(-8,-10); ctx.lineTo(-15,-28-flip*9); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(8,-10); ctx.lineTo(15,-28-flip*9); ctx.stroke();
+      ctx.fillStyle='#A07040';
+      ctx.beginPath(); ctx.arc(-15,-29-flip*9,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(15,-29-flip*9,4,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#FFFDE7';
+      ctx.beginPath(); ctx.moveTo(-5,10); ctx.lineTo(-13,29); ctx.lineTo(-7,31); ctx.lineTo(-1,12); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(5,10); ctx.lineTo(13,29); ctx.lineTo(7,31); ctx.lineTo(1,12); ctx.fill();
+      ctx.beginPath(); ctx.arc(0,-23,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
+      ctx.fillStyle='#1a1a1a';
+      ctx.beginPath(); ctx.arc(-3,-24,2.2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(3,-24,2.2,0,Math.PI*2); ctx.fill();
+    }
+    else if (pose === 5) {
+      // AÚ DE FRENTE — front handstand walkover facing forward
+      ctx.rotate(-Math.PI/2 + sin * 0.32);
+      ctx.scale(1,-1); ctx.translate(0,-8);
+      ctx.strokeStyle='#7B4F2E'; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(-10,8); ctx.lineTo(-12,28); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(10,8); ctx.lineTo(12,28); ctx.stroke();
+      ctx.fillStyle='#A07040';
+      ctx.beginPath(); ctx.arc(-12,29,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(12,29,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0,-4,10,13,0,0,Math.PI*2); ctx.fillStyle='#F8F8F0'; ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0,-4,10,13,0,0,Math.PI*2); ctx.clip();
+      ctx.fillStyle='#1B5E20'; ctx.fillRect(-11,-18,22,8); ctx.restore();
+      ctx.fillStyle='#FFFDE7';
+      const ls = sin * 10;
+      ctx.beginPath(); ctx.moveTo(-4,-16); ctx.lineTo(-14+ls,-42); ctx.lineTo(-8+ls,-44); ctx.lineTo(-1,-18); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(4,-16); ctx.lineTo(14-ls,-42); ctx.lineTo(8-ls,-44); ctx.lineTo(1,-18); ctx.fill();
+      ctx.fillStyle='#A07040';
+      ctx.beginPath(); ctx.arc(-11+ls,-43,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(11-ls,-43,4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0,23,11,0,Math.PI*2); ctx.fillStyle='#A07040'; ctx.fill();
+      ctx.fillStyle='#C4956A'; ctx.beginPath(); ctx.ellipse(0,25,7,5,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#1a1a1a';
+      ctx.beginPath(); ctx.arc(-3.5,21,2.2,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(3.5,21,2.2,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  _drawLovestruckChicken(ctx, x, y, t) {
+    ctx.save(); ctx.translate(x, y);
+    ctx.scale(1.6 * t, 1.6 * t);
+    ctx.translate(0, Math.sin(Date.now() / 175) * 5);
+    // Flip to face left (toward monkey)
+    ctx.save(); ctx.scale(-1, 1);
+    ctx.beginPath(); ctx.ellipse(0,0,16,13,0,0,Math.PI*2);
+    ctx.fillStyle='#FFD600'; ctx.fill(); ctx.strokeStyle='#F9A825'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(-5,2,8,10,-0.4,0,Math.PI*2); ctx.fillStyle='#FFC107'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(16,0); ctx.lineTo(24,-3); ctx.lineTo(24,3); ctx.closePath();
+    ctx.fillStyle='#E65100'; ctx.fill();
+    ctx.fillStyle='#D32F2F';
+    for (let i=-1; i<=1; i++) {
+      ctx.beginPath(); ctx.moveTo(i*5-3,-12); ctx.lineTo(i*5+3,-12); ctx.lineTo(i*5,-20); ctx.closePath(); ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(12,4,4,0,Math.PI*2); ctx.fillStyle='#C62828'; ctx.fill();
+    // Heart eyes
+    for (const [ex,ey] of [[7,-4],[-2,-4]]) {
+      ctx.beginPath(); ctx.arc(ex,ey,5,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill();
+      ctx.save(); ctx.translate(ex, ey+0.5);
+      ctx.beginPath();
+      ctx.moveTo(0,2.5);
+      ctx.bezierCurveTo(-3.5,-0.5,-4.5,-4,0,-4);
+      ctx.bezierCurveTo(4.5,-4,3.5,-0.5,0,2.5);
+      ctx.fillStyle='#E91E63'; ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore(); // end scale(-1,1)
+    // Floating hearts rising from chicken
+    const ht = (Date.now() / 750) % 1;
+    for (let i = 0; i < 3; i++) {
+      const ph = (ht + i / 3) % 1;
+      ctx.save();
+      ctx.globalAlpha = 0.9 * (1 - ph) * t;
+      drawHeart(ctx, -30 - i * 12, -12 - ph * 50, 6, '#E91E63');
+      ctx.restore();
+    }
+    ctx.restore();
   }
 }
 
